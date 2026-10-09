@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments (pipenv keeps Pipfile and Pipfile.lock, which stay tracked)
+.venv/
+venv/
+env/
+
+# Django
+*.log
+local_settings.py
+media/
+staticfiles/
+
+# SQLite: db.sqlite3 is intentionally NOT ignored because the course
+# submission requires it. Uncomment the next lines for a real project.
+# db.sqlite3
+# db.sqlite3-journal
+
+# Environment variables and secrets
+.env
+.env.*
+
+# Test and coverage output
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Editors and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

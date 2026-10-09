@@ -1,0 +1,81 @@
+RESTAURANT MANAGEMENT API  -  Django + DRF + Djoser + SQLite
+=====================================================
+
+RUN IT
+------
+cd RestaurantManagement
+pipenv shell
+pipenv install
+python manage.py makemigrations
+python manage.py migrate
+python manage.py runserver
+(db.sqlite3 is included and already contains the users/data below, so you can
+ also skip straight to "runserver".  Run tests with: python manage.py test)
+
+CREDENTIALS  (every account uses the same password)
+---------------------------------------------------
+Password for ALL users:  Lemon@2026pass
+
+admin       superuser  -> Django admin panel at /admin/ and admin API token
+manager1    group: Manager
+manager2    group: Manager
+delivery1   group: Delivery crew
+delivery2   group: Delivery crew
+customer1   no group (customer)  - has 1 sample order assigned to delivery1
+customer2   no group (customer)  - has 1 item waiting in the cart
+customer3   no group (customer)
+
+Groups were created in the Django admin as: "Manager" and "Delivery crew".
+(Group names are matched case-insensitively, so "manager" / "Delivery Crew"
+ also work if you recreate them.)
+
+AUTH
+----
+POST /token/login/            form/JSON body: username, password -> {"auth_token": "..."}
+Send the token on every request:   Authorization: Token <auth_token>
+POST /api/users               register a customer (username, email, password)
+GET  /api/users/me/           current user
+Browsable API login (browser): /api-auth/login/
+
+ENDPOINTS  (trailing slash is optional on every route)
+--------------------------------------------------------
+Categories
+  GET  /api/categories                       any logged-in user
+  POST /api/categories                       manager/admin  {"slug":"sides","title":"Sides"}
+Menu items
+  GET  /api/menu-items                       any logged-in user
+       ?category=mains | ?category=2         filter by category slug/title/id
+       ?ordering=price  or  ?ordering=-price sort by price
+       ?page=2&perpage=3                     pagination (default 6 per page)
+       ?search=lemon  ?featured=true  ?from_price=5&to_price=15
+  POST /api/menu-items                       manager/admin
+       {"title":"Fries","price":"4.00","featured":false,"category_id":1}
+  GET  /api/menu-items/{id}                  any logged-in user
+  PUT/PATCH/DELETE /api/menu-items/{id}      manager/admin
+       item of the day:  PATCH {"featured": true}
+Groups  (manager/admin only)
+  GET/POST   /api/groups/manager/users             POST {"username":"customer3"}
+  DELETE     /api/groups/manager/users/{userId}
+  GET/POST   /api/groups/delivery-crew/users       POST {"username":"customer3"}
+  DELETE     /api/groups/delivery-crew/users/{userId}
+Cart (current user)
+  GET    /api/cart/menu-items
+  POST   /api/cart/menu-items                {"menuitem": 1, "quantity": 2}
+  DELETE /api/cart/menu-items                clears the cart
+Orders
+  GET   /api/orders          customer: own | delivery crew: assigned | manager: all
+                             ?status=0|1  ?date=YYYY-MM-DD  ?ordering=-date|total  ?page=
+  POST  /api/orders          turns the cart into an order, then empties the cart
+  GET   /api/orders/{id}     owner / assigned crew / manager
+  PUT/PATCH /api/orders/{id} manager: {"delivery_crew": <userId>, "status": 0|1}
+                             delivery crew: PATCH {"status": 0|1} only
+  DELETE /api/orders/{id}    manager only
+  status 0 = out for delivery, 1 = delivered
+
+STATUS CODES
+------------
+200 OK (GET/PUT/PATCH/DELETE) | 201 Created (POST) | 400 invalid data
+401 not authenticated / bad token | 403 authenticated but not allowed
+404 resource not found | 429 throttled
+
+THROTTLING   anonymous: 20/minute, authenticated: 60/minute (settings.py)
