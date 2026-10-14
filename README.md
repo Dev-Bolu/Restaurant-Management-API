@@ -1,179 +1,170 @@
 # Restaurant Management API
 
-A role-based REST API for restaurant management (Little Lemon course project), built with **Django**, **Django REST Framework** and **Djoser**, using **SQLite**. Customers can browse the menu, fill a cart and place orders. Managers manage the menu and assign delivery crew, and the crew mark orders as delivered.
+A Django REST Framework API for running a restaurant's ordering system: menu and categories, customer carts, order placement, and role-based access for managers, delivery crew, and customers.
 
 ## Features
 
-- Token authentication and user registration (Djoser)
-- Three roles: **Manager**, **Delivery crew** and **Customer** (any user not in a group)
-- Menu and category management (managers/admin only for writes)
-- Cart and order flow: the cart becomes an order, then is emptied
-- Filtering, search, sorting and pagination on menu items and orders
-- Throttling for anonymous and authenticated users
-- Consistent HTTP status codes and error messages
-- Automated tests (`python manage.py test`)
+- Token authentication with user registration and login (Djoser)
+- Role-based access for three roles: **manager**, **delivery crew**, and **customer**
+- Menu items and categories, with filtering by category (id, slug or title), featured items, and price range, plus search, ordering, and pagination
+- Managers add and remove users from the manager and delivery-crew groups
+- Per-user cart: adding an item already in the cart increases its quantity, and the price is recorded at the time of adding
+- Order placement from the cart inside a database transaction (the order, its items, and the cart clearing succeed or fail together)
+- Order visibility by role: customers see their own orders, delivery crew see orders assigned to them, managers see all orders
+- Managers assign orders to delivery crew; delivery crew can only update the status of their assigned orders
+- Order filtering by status, date, user, and delivery crew
+- Rate limiting: 20 requests/minute for anonymous users, 60 requests/minute for authenticated users
 
 ## Tech stack
 
-Python, Django 5.2, Django REST Framework, Djoser, SQLite, pipenv
+Django, Django REST Framework, Djoser (token authentication), [database]
+
+## Roles and permissions
+
+| Action | Customer | Delivery crew | Manager |
+| --- | --- | --- | --- |
+| Browse menu items and categories | Yes | Yes | Yes |
+| Create, edit, delete menu items and categories | No | No | Yes |
+| Manage manager and delivery-crew groups | No | No | Yes |
+| Use own cart | Yes | Yes | Yes |
+| Place an order | Yes | Yes | Yes |
+| View orders | Own orders | Assigned orders | All orders |
+| Update an order | No | Status only (PATCH) | Any field, including assigning delivery crew |
+| Delete an order | No | No | Yes |
+
+All endpoints require authentication.
+
+## Order status
+
+`0` means out for delivery (once a crew member is assigned). `1` means delivered.
+
+## Setup
+
+```bash
+git clone https://github.com/Dev-Bolu/Restaurant-Management-API.git
+cd Restaurant-Management-API
+python -m venv venv
+source venv/bin/activate        # Windows: venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+Create a `.env` file next to `settings.py` with these variables (see `.env.example`):
+
+```
+SECRET_KEY=
+DEBUG=
+[other variables]
+```
+
+Then run:
+
+```bash
+cd RestaurantManagement         # the folder containing manage.py
+python manage.py migrate
+python manage.py createsuperuser
+python manage.py runserver
+```
+
+## Authentication
+
+Register, log in, and send the token with every request.
+
+| Method | URL | Description |
+| --- | --- | --- |
+| POST | `/api/users/` | Register (`username`, `password`, `email`) |
+| GET | `/api/users/me/` | View your profile |
+| POST | `/api/token/login/` | Log in (`username`, `password`); returns `auth_token` |
+| POST | `/api/token/logout/` | Log out and invalidate the token |
+
+Send the token as `Authorization: Token <auth_token>`.
+
+## Endpoints
+
+Base prefix: `/api/`. Every route works with or without a trailing slash. Lists are paginated: `?page=` and `?perpage=` (default page size 6).
+
+### Categories
+
+| Method | URL | Access |
+| --- | --- | --- |
+| GET | `/api/categories` | Any logged-in user |
+| POST | `/api/categories` | Manager |
+| GET | `/api/categories/<id>` | Any logged-in user |
+| PUT, PATCH, DELETE | `/api/categories/<id>` | Manager |
+
+### Menu items
+
+| Method | URL | Access |
+| --- | --- | --- |
+| GET | `/api/menu-items` | Any logged-in user |
+| POST | `/api/menu-items` | Manager |
+| GET | `/api/menu-items/<id>` | Any logged-in user |
+| PUT, PATCH, DELETE | `/api/menu-items/<id>` | Manager |
+
+Query parameters for `GET /api/menu-items`: `category` (id, slug or title), `featured` (true/false), `from_price`, `to_price`, `search`, `ordering` (`price`, `-price`, `title`), `page`, `perpage`.
+
+### User groups (manager only)
+
+| Method | URL | Description |
+| --- | --- | --- |
+| GET | `/api/groups/manager/users` | List managers |
+| POST | `/api/groups/manager/users` | Add a user to the manager group (`username` or `user_id`) |
+| DELETE | `/api/groups/manager/users/<id>` | Remove a user from the manager group |
+| GET | `/api/groups/delivery-crew/users` | List delivery crew |
+| POST | `/api/groups/delivery-crew/users` | Add a user to the delivery-crew group |
+| DELETE | `/api/groups/delivery-crew/users/<id>` | Remove a user from the delivery-crew group |
+
+### Cart
+
+| Method | URL | Description |
+| --- | --- | --- |
+| GET | `/api/cart/menu-items` | List your cart items |
+| POST | `/api/cart/menu-items` | Add an item (`menuitem`, `quantity`); adding the same item again increases its quantity |
+| DELETE | `/api/cart/menu-items` | Clear your cart |
+
+### Orders
+
+| Method | URL | Description |
+| --- | --- | --- |
+| GET | `/api/orders` | List orders visible to your role |
+| POST | `/api/orders` | Place an order from your current cart (the cart is then cleared) |
+| GET | `/api/orders/<id>` | View one order (owner, assigned crew, or manager) |
+| PUT, PATCH | `/api/orders/<id>` | Manager: update any field. Delivery crew: PATCH `status` only |
+| DELETE | `/api/orders/<id>` | Manager only |
+
+Query parameters for `GET /api/orders`: `status` (`0` or `1`), `date` (`YYYY-MM-DD`), `user` and `delivery_crew` (managers only), `search`, `ordering` (`date`, `total`, `status`, `-date`), `page`, `perpage`.
+
+## Example
+
+```bash
+# Log in
+curl -X POST http://localhost:8000/api/token/login/ \
+  -H "Content-Type: application/json" \
+  -d '{"username": "you", "password": "yourpassword"}'
+
+# Add an item to your cart
+curl -X POST http://localhost:8000/api/cart/menu-items \
+  -H "Authorization: Token <auth_token>" \
+  -H "Content-Type: application/json" \
+  -d '{"menuitem": 1, "quantity": 2}'
+
+# Place the order
+curl -X POST http://localhost:8000/api/orders \
+  -H "Authorization: Token <auth_token>"
+```
 
 ## Project structure
 
 ```
-RestaurantManagement/                 project directory
-├── RestaurantManagement/             settings and root URLs
-├── RestaurantManagementAPI/          the single app holding all endpoints
-│   ├── models.py            Category, MenuItem, Cart, Order, OrderItem
-│   ├── serializers.py
-│   ├── views.py
-│   ├── permissions.py       manager-only write permission
-│   ├── roles.py             group/role helpers
-│   ├── pagination.py
-│   ├── urls.py
-│   ├── tests.py
-│   └── management/commands/seed_demo.py
-├── db.sqlite3               included, pre-loaded with demo data
-├── notes.txt                credentials and endpoint cheat sheet
-├── Pipfile / Pipfile.lock
-└── manage.py
+RestaurantManagement/              Project settings and root URLs
+RestaurantManagementAPI/
+  models.py                        Category, MenuItem, Cart, Order, OrderItem
+  views.py                         Menu, cart, order, and group-management views
+  permissions.py                   IsManager and ManagerWriteMixin
+  roles.py                         Group helpers (manager, delivery crew)
+  pagination.py                    Page-size pagination (?page=, ?perpage=)
+  urls.py                          Routes
 ```
 
-## Getting started
+## Author
 
-```bash
-cd RestaurantManagement
-pipenv shell
-pipenv install
-python manage.py makemigrations
-python manage.py migrate
-python manage.py runserver
-```
-
-The included `db.sqlite3` already contains the demo users and data, so you can skip straight to `runserver`.
-
-To rebuild the demo data on a fresh database:
-
-```bash
-python manage.py migrate
-python manage.py seed_demo
-```
-
-Run the tests:
-
-```bash
-python manage.py test
-```
-
-## Demo accounts
-
-All accounts use the password `Lemon@2026pass`.
-
-| Username | Role |
-|---|---|
-| admin | Superuser (Django admin at `/admin/`) |
-| manager1, manager2 | Manager |
-| delivery1, delivery2 | Delivery crew |
-| customer1, customer2, customer3 | Customer |
-
-Groups are named **Manager** and **Delivery crew**. Matching is case-insensitive, so recreated groups such as "delivery crew" also work.
-
-## Authentication
-
-1. Log in: `POST /token/login/` with `username` and `password`. The response is `{"auth_token": "..."}`.
-2. Send the token on every request: `Authorization: Token <auth_token>`.
-3. Register: `POST /api/users` with `username`, `email` and `password`.
-4. Current user: `GET /api/users/me/`.
-
-For the browsable API in a browser, log in at `/api-auth/login/`.
-
-## API endpoints
-
-Trailing slashes are optional on every route.
-
-### Categories
-
-| Method | Endpoint | Role | Purpose |
-|---|---|---|---|
-| GET | `/api/categories` | Any logged-in user | List categories |
-| POST | `/api/categories` | Manager/admin | Create a category |
-
-### Menu items
-
-| Method | Endpoint | Role | Purpose |
-|---|---|---|---|
-| GET | `/api/menu-items` | Any logged-in user | List items |
-| POST | `/api/menu-items` | Manager/admin | Create an item (201) |
-| GET | `/api/menu-items/{id}` | Any logged-in user | Single item |
-| PUT, PATCH | `/api/menu-items/{id}` | Manager/admin | Update (PATCH `featured` sets the item of the day) |
-| DELETE | `/api/menu-items/{id}` | Manager/admin | Delete |
-
-Everyone else gets 403 on writes.
-
-**Query parameters for `GET /api/menu-items`**
-
-| Parameter | Example | Effect |
-|---|---|---|
-| `category` | `?category=mains` or `?category=2` | Filter by category slug, title or id |
-| `ordering` | `?ordering=price` or `?ordering=-price` | Sort (also `title`) |
-| `page`, `perpage` | `?page=2&perpage=3` | Pagination (default 6 per page) |
-| `search` | `?search=lemon` | Search title and category |
-| `featured` | `?featured=true` | Item-of-the-day filter |
-| `from_price`, `to_price` | `?from_price=5&to_price=15` | Price range |
-
-### Group management (manager/admin only)
-
-| Method | Endpoint | Purpose |
-|---|---|---|
-| GET | `/api/groups/manager/users` | List managers |
-| POST | `/api/groups/manager/users` | Add a manager, body `{"username": "..."}` (201) |
-| DELETE | `/api/groups/manager/users/{userId}` | Remove a manager (200, or 404) |
-| GET | `/api/groups/delivery-crew/users` | List delivery crew |
-| POST | `/api/groups/delivery-crew/users` | Add crew, body `{"username": "..."}` (201) |
-| DELETE | `/api/groups/delivery-crew/users/{userId}` | Remove crew (200, or 404) |
-
-### Cart (current user)
-
-| Method | Endpoint | Purpose |
-|---|---|---|
-| GET | `/api/cart/menu-items` | Items in my cart |
-| POST | `/api/cart/menu-items` | Add an item, body `{"menuitem": 1, "quantity": 2}` |
-| DELETE | `/api/cart/menu-items` | Empty my cart |
-
-Adding an item that is already in the cart increases its quantity.
-
-### Orders
-
-| Method | Endpoint | Role | Purpose |
-|---|---|---|---|
-| GET | `/api/orders` | All | Customer: own orders. Delivery crew: assigned orders. Manager: all orders |
-| POST | `/api/orders` | Customer | Turn the cart into an order, then empty the cart |
-| GET | `/api/orders/{id}` | Owner, assigned crew, manager | Order with its items (403 for other users) |
-| PUT, PATCH | `/api/orders/{id}` | Manager | Set `delivery_crew` and `status` |
-| PATCH | `/api/orders/{id}` | Delivery crew | Update `status` only |
-| DELETE | `/api/orders/{id}` | Manager | Delete the order |
-
-Order status: `0` is out for delivery, `1` is delivered. Order lists support `?status=0|1`, `?date=YYYY-MM-DD`, `?ordering=-date` or `total`, `?search=`, and `?page=` / `?perpage=`.
-
-## Status codes
-
-| Code | Meaning |
-|---|---|
-| 200 | Successful GET, PUT, PATCH, DELETE |
-| 201 | Successful POST |
-| 400 | Validation failed |
-| 401 | Not authenticated or bad token |
-| 403 | Authenticated but not allowed |
-| 404 | Resource not found |
-| 429 | Throttled |
-
-## Throttling
-
-Anonymous users: 20 requests per minute. Authenticated users: 60 requests per minute. Change these in `RestaurantManagement/settings.py` under `DEFAULT_THROTTLE_RATES`.
-
-## Example walkthrough
-
-1. Log in as `admin` and add `customer3` to the manager group: `POST /api/groups/manager/users` with `{"username": "customer3"}`.
-2. Log in as `manager1` and set an item of the day: `PATCH /api/menu-items/1` with `{"featured": true}`.
-3. Log in as `customer2`, add items with `POST /api/cart/menu-items`, then place the order with `POST /api/orders`.
-4. As `manager1`, assign it: `PATCH /api/orders/{id}` with `{"delivery_crew": 5, "status": 0}`.
-5. As `delivery1`, deliver it: `PATCH /api/orders/{id}` with `{"status": 1}`.
+Akanbi Boluwatife Emmanuel — [GitHub](https://github.com/Dev-Bolu)
